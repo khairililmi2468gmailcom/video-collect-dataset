@@ -1,0 +1,28 @@
+# --- GENERAL ---
+.DS_Store
+*.log
+
+# --- NODE MODULES (Untuk Server & App) ---
+node_modules/
+**/node_modules/
+
+# --- MOBILE APP (Expo/React Native) ---
+.expo/
+dist/
+web-build/
+mobile-app/expo-env.d.ts
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+
+# --- SERVER ---
+# Jangan upload database lokal (opsional, kalau mau upload db kosongan boleh, tapi yg isi jangan)
+server/dataset.db
+
+# PENTING: Jangan upload video hasil rekaman ke GitHub!
+server/uploads/
+
+# Upload foldernya saja, tapi isinya jangan (supaya folder uploads tetap ada di repo)
+!server/uploads/.gitkeep
