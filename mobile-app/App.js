@@ -16,8 +16,6 @@ if (Platform.OS !== 'web') {
 }
 
 // ⚠️ GANTI IP DI SINI
-// const API_URL = 'http://10.44.0.203:3001';
-// const API_URL = 'http://202.4.186.8:3001';
 const API_URL = '';
 // Direktori simpan (Hanya untuk Native)
 const DIR_RECORDINGS = Platform.OS !== 'web'
