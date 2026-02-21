@@ -1,2 +1,5 @@
 Cara Import via Terminal (sekali saja):
 curl -X POST -H "Content-Type: application/json" -d @seed_data.json http://localhost:3001/api/import-sentences
+curl -4 ifconfig.
+
+curl -X POST -H "Content-Type: application/json" -d @seed_data.json http://localhost:3001/api/import-sentences

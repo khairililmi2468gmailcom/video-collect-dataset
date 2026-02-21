@@ -15,11 +15,10 @@ if (Platform.OS !== 'web') {
     FileSystem = require('expo-file-system');
 }
 
-// =================================================================
 // ⚠️ GANTI IP DI SINI
-// =================================================================
-const API_URL = 'http://localhost:3001';
-
+// const API_URL = 'http://10.44.0.203:3001';
+// const API_URL = 'http://202.4.186.8:3001';
+const API_URL = '';
 // Direktori simpan (Hanya untuk Native)
 const DIR_RECORDINGS = Platform.OS !== 'web'
     ? FileSystem.documentDirectory + 'recordings/'
@@ -51,7 +50,7 @@ const ModernInput = ({ icon, placeholder, value, onChangeText, keyboardType }) =
 
 export default function App() {
     const [permission, requestPermission] = useCameraPermissions();
-
+    const [isProcessingRecord, setIsProcessingRecord] = useState(false);
     // --- STATES ---
     const [step, setStep] = useState(1);
     const [loading, setLoading] = useState(false);
@@ -156,7 +155,7 @@ export default function App() {
 
         setLoading(true);
         try {
-            const res = await fetch(`${API_URL}/api/sentences?limit=10`);
+            const res = await fetch(`${API_URL}/api/sentences?limit=50`);
             const data = await res.json();
             if (Array.isArray(data) && data.length > 0) {
                 setSentences(data);
@@ -191,6 +190,8 @@ export default function App() {
     };
 
     const startRecording = async () => {
+        setIsProcessingRecord(true); // Kunci tombol saat jeda
+
         // 1. WEB RECORDING LOGIC
         if (Platform.OS === 'web') {
             try {
@@ -201,44 +202,50 @@ export default function App() {
                 webRecorderRef.current = mediaRecorder;
 
                 mediaRecorder.ondataavailable = (event) => {
-                    if (event.data.size > 0) {
-                        webChunksRef.current.push(event.data);
-                    }
+                    if (event.data.size > 0) webChunksRef.current.push(event.data);
                 };
 
                 mediaRecorder.onstop = async () => {
-                    // Saat stop, jadikan Blob URL
                     const blob = new Blob(webChunksRef.current, { type: 'video/mp4' });
                     const videoUrl = URL.createObjectURL(blob);
                     await processRecordedVideo(videoUrl);
-
-                    // Matikan stream kamera
                     stream.getTracks().forEach(track => track.stop());
                 };
 
+                // MULAI REKAM SEKARANG (kamera merekam senyap)
                 mediaRecorder.start();
-                setIsRecording(true);
-                startTimer();
+
+                // Tunggu 200ms baru beri aba-aba (UI) ke user untuk ngomong
+                setTimeout(() => {
+                    setIsRecording(true);
+                    setIsProcessingRecord(false); // Buka kunci tombol
+                    startTimer();
+                }, 200);
 
             } catch (err) {
                 console.error("Web Camera Error:", err);
-                Alert.alert("Error", "Gagal akses kamera/mikrofon di browser.");
+                Alert.alert("Error", "Gagal akses kamera. Pastikan Insecure Origin diizinkan di Chrome.");
+                setIsProcessingRecord(false);
             }
         }
         // 2. NATIVE RECORDING LOGIC (Android/iOS)
         else {
             if (cameraRef.current) {
                 try {
-                    setIsRecording(true);
-                    startTimer();
+                    // Tunggu 200ms baru beri aba-aba UI
+                    setTimeout(() => {
+                        setIsRecording(true);
+                        setIsProcessingRecord(false);
+                        startTimer();
+                    }, 200);
 
+                    // Kamera HP mulai merekam di latar belakang
                     const video = await cameraRef.current.recordAsync({ maxDuration: 60 });
 
-                    // Stop UI updates
+                    // Blok ini tereksekusi SETELAH stopRecording dipanggil
                     stopTimer();
                     setIsRecording(false);
 
-                    // Pindahkan file (Hanya Native)
                     const filename = `rec_${Date.now()}.mp4`;
                     const newPath = DIR_RECORDINGS + filename;
                     await FileSystem.moveAsync({ from: video.uri, to: newPath });
@@ -248,7 +255,7 @@ export default function App() {
                 } catch (e) {
                     stopTimer();
                     setIsRecording(false);
-                    console.error(e);
+                    setIsProcessingRecord(false);
                     Alert.alert("Error", "Gagal merekam di HP.");
                 }
             }
@@ -256,18 +263,24 @@ export default function App() {
     };
 
     const stopRecording = () => {
-        if (Platform.OS === 'web') {
-            if (webRecorderRef.current && isRecording) {
-                webRecorderRef.current.stop();
-                setIsRecording(false);
-                stopTimer();
+        if (!isRecording) return;
+        setIsProcessingRecord(true); // Kunci tombol agar tidak di-klik dobel
+
+        // Jeda 200ms sebelum benar-benar mematikan rekaman (merekam ujung suara)
+        setTimeout(() => {
+            if (Platform.OS === 'web') {
+                if (webRecorderRef.current && webRecorderRef.current.state === 'recording') {
+                    webRecorderRef.current.stop();
+                }
+            } else {
+                if (cameraRef.current) {
+                    cameraRef.current.stopRecording();
+                }
             }
-        } else {
-            if (cameraRef.current && isRecording) {
-                cameraRef.current.stopRecording();
-                // Logic native selanjutnya ada di baris "await cameraRef...recordAsync" di atas
-            }
-        }
+            setIsRecording(false);
+            stopTimer();
+            setIsProcessingRecord(false); // Buka kunci
+        }, 200);
     };
 
     // Helper untuk memproses hasil video (Web & Native)
@@ -295,7 +308,6 @@ export default function App() {
         }
     };
 
-    // --- UPLOAD & DELETE ---
     // --- DELETE LOGIC (FIXED FOR WEB & NATIVE) ---
     const deleteRecording = async (id) => {
         // 1. Fungsi inti untuk menghapus data
@@ -416,6 +428,56 @@ export default function App() {
         Alert.alert("Hasil Upload", `Berhasil: ${successCount} video.`);
     };
 
+    // --- FUNGSI HAPUS SEMUA DATA (CLEAR ALL) ---
+    const clearAllRecordings = async () => {
+        const executeClear = async () => {
+            setLoading(true);
+            try {
+                // 1. Bersihkan file fisik (HP) atau memori browser (Web)
+                for (const item of queue) {
+                    if (Platform.OS !== 'web') {
+                        try {
+                            await FileSystem.deleteAsync(item.uri, { idempotent: true });
+                        } catch (e) {
+                            console.log("File fisik error/hilang:", e);
+                        }
+                    } else {
+                        // Bersihkan URL Blob di Web agar tidak bocor memori
+                        if (item.uri) {
+                            URL.revokeObjectURL(item.uri);
+                        }
+                    }
+                }
+
+                // 2. Kosongkan State dan AsyncStorage
+                setQueue([]);
+                await AsyncStorage.setItem('offline_queue', JSON.stringify([]));
+
+            } catch (error) {
+                console.error("Gagal menghapus semua:", error);
+                Alert.alert("Error", "Terjadi kesalahan saat menghapus data.");
+            } finally {
+                setLoading(false);
+            }
+        };
+
+        // Konfirmasi sebelum mengeksekusi (Beda UI Web vs HP)
+        if (Platform.OS === 'web') {
+            const isConfirmed = window.confirm("PERINGATAN: Anda yakin ingin menghapus SEMUA rekaman di galeri?");
+            if (isConfirmed) {
+                await executeClear();
+            }
+        } else {
+            Alert.alert(
+                "Hapus Semua Rekaman",
+                "Semua data yang belum diupload akan dihapus permanen. Lanjutkan?",
+                [
+                    { text: "Batal", style: "cancel" },
+                    { text: "Hapus Semua", style: "destructive", onPress: executeClear }
+                ]
+            );
+        }
+    };
 
     // =================================================================
     // UI
@@ -548,9 +610,15 @@ export default function App() {
                         <Ionicons name="arrow-back" size={24} color="#1e293b" />
                     </TouchableOpacity>
                     <Text style={styles.pageTitle}>Galeri & Upload</Text>
-                    <View style={{ width: 40 }} />
-                </View>
 
+                    {queue.length > 0 ? (
+                        <TouchableOpacity onPress={clearAllRecordings} style={{ padding: 10, backgroundColor: '#fee2e2', borderRadius: 12 }}>
+                            <Ionicons name="trash" size={20} color="#ef4444" />
+                        </TouchableOpacity>
+                    ) : (
+                        <View style={{ width: 40 }} />
+                    )}
+                </View>
                 <ScrollView style={styles.listContainer}>
                     {queue.length === 0 ? (
                         <View style={styles.emptyState}>
@@ -595,20 +663,19 @@ export default function App() {
                                 </TouchableOpacity>
                             </View>
 
-                            {/* Gunakan ResizeMode.CONTAIN agar SELURUH video (wajah penuh) 
-                            masuk ke layar tanpa terpotong (crop). 
-                            Jika pakai COVER, dahi/dagu bisa terpotong.
-                        */}
-                            {selectedVideo && (
-                                <Video
-                                    style={{ width: '100%', height: 400, backgroundColor: 'black' }}
-                                    source={{ uri: selectedVideo.uri }}
-                                    useNativeControls
-                                    resizeMode={ResizeMode.CONTAIN}
-                                    isLooping
-                                    shouldPlay
-                                />
-                            )}
+                            {/* TAMBAHKAN WRAPPER INI: Kotak hitam statis agar video tidak kebingungan mencari ukuran */}
+                            <View style={{ width: '100%', height: Platform.OS === 'web' ? 450 : 400, backgroundColor: 'black', justifyContent: 'center', alignItems: 'center' }}>
+                                {selectedVideo && (
+                                    <Video
+                                        style={{ width: '100%', height: '100%' }}
+                                        source={{ uri: selectedVideo.uri }}
+                                        useNativeControls
+                                        resizeMode={ResizeMode.CONTAIN}
+                                        isLooping
+                                        shouldPlay
+                                    />
+                                )}
+                            </View>
 
                             {/* Tampilkan teks di bawah video agar jelas apa yang diucapkan */}
                             {selectedVideo && (
@@ -682,7 +749,7 @@ const styles = StyleSheet.create({
     emptyState: { alignItems: 'center', marginTop: 80 },
 
     modalContainer: { flex: 1, backgroundColor: 'rgba(0,0,0,0.9)', justifyContent: 'center', padding: 20 },
-    modalContent: { backgroundColor: 'white', borderRadius: 20, overflow: 'hidden' },
+    modalContent: { backgroundColor: 'white', borderRadius: 20, overflow: 'hidden', width: '100%', maxWidth: 450, alignSelf: 'center' },
     modalHeader: { padding: 15, flexDirection: 'row', justifyContent: 'space-between' },
     modalTitle: { fontWeight: 'bold' },
     videoPlayer: { width: '100%', height: 300, backgroundColor: 'black' }

@@ -121,7 +121,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 // Jika user buka link sembarang (misal /profile, /record) yang bukan API,
 // kirimkan file index.html milik Web App.
 // Ini penting agar React Router di Web berfungsi saat di-refresh.
-app.get('*', (req, res) => {
+app.get(/.*/, (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
