@@ -75,6 +75,7 @@ export default function App() {
     // Preview
     const [previewModalVisible, setPreviewModalVisible] = useState(false);
     const [selectedVideo, setSelectedVideo] = useState(null);
+    const [reRecordId, setReRecordId] = useState(null);
 
     // --- INIT ---
     useEffect(() => {
@@ -260,6 +261,35 @@ export default function App() {
         }
     };
 
+    // --- FUNGSI REKAM ULANG ---
+    const handleReRecord = () => {
+        if (!selectedVideo) return;
+
+        // Cari index kalimat di dalam array sentences
+        const idx = sentences.findIndex(s => s.id === selectedVideo.sentenceId);
+        if (idx === -1) {
+            Alert.alert("Error", "Teks kalimat tidak ditemukan di sesi ini.");
+            return;
+        }
+
+        const confirmMsg = "Anda akan mengulang rekaman ini. Rekaman lama akan diganti setelah Anda selesai merekam. Lanjut?";
+
+        const executeReRecord = () => {
+            setReRecordId(selectedVideo.id); // Tandai ID mana yang mau diganti
+            setCurrentIndex(idx);            // Set teks kamera ke kalimat ini
+            setPreviewModalVisible(false);   // Tutup modal
+            setStep(2);                      // Pindah ke layar Kamera
+        };
+
+        if (Platform.OS === 'web') {
+            if (window.confirm(confirmMsg)) executeReRecord();
+        } else {
+            Alert.alert("Rekam Ulang", confirmMsg, [
+                { text: "Batal", style: "cancel" },
+                { text: "Ya, Rekam Ulang", onPress: executeReRecord }
+            ]);
+        }
+    };
     const stopRecording = () => {
         if (!isRecording) return;
         setIsProcessingRecord(true); // Kunci tombol agar tidak di-klik dobel
@@ -287,7 +317,7 @@ export default function App() {
 
         const newRecord = {
             id: Date.now().toString(),
-            uri: uri, // Di Web ini Blob URL, di HP ini File Path
+            uri: uri,
             sentenceId: currentSentence.id,
             text: currentSentence.text,
             metadata: meta,
@@ -295,7 +325,32 @@ export default function App() {
             date: new Date().toISOString()
         };
 
-        const updatedQueue = [...queue, newRecord];
+        let updatedQueue;
+
+        // --- LOGIKA JIKA SEDANG REKAM ULANG ---
+        if (reRecordId) {
+            // 1. Hapus file fisik/blob dari rekaman lama
+            const oldRecord = queue.find(q => q.id === reRecordId);
+            if (oldRecord) {
+                if (Platform.OS !== 'web') {
+                    try { await FileSystem.deleteAsync(oldRecord.uri, { idempotent: true }); }
+                    catch (e) { console.log("File lama hilang:", e); }
+                } else {
+                    if (oldRecord.uri) URL.revokeObjectURL(oldRecord.uri);
+                }
+            }
+
+            // 2. Ganti data lama dengan yang baru di antrean
+            updatedQueue = queue.map(q => q.id === reRecordId ? newRecord : q);
+            await saveQueueToStorage(updatedQueue);
+
+            setReRecordId(null); // Matikan mode rekam ulang
+            setStep(3);          // Langsung kembali ke galeri
+            return;              // Stop eksekusi agar tidak maju ke teks berikutnya
+        }
+
+        // BUKAN REKAM ULANG
+        updatedQueue = [...queue, newRecord];
         await saveQueueToStorage(updatedQueue);
 
         if (currentIndex < sentences.length - 1) {
@@ -305,7 +360,6 @@ export default function App() {
             setStep(3);
         }
     };
-
     // --- DELETE LOGIC (FIXED FOR WEB & NATIVE) ---
     const deleteRecording = async (id) => {
         // 1. Fungsi inti untuk menghapus data
@@ -561,7 +615,7 @@ export default function App() {
 
                     {!isRecording && (
                         <View style={styles.camHeader}>
-                            <TouchableOpacity onPress={() => setStep(1)} style={styles.iconBtn}>
+                            <TouchableOpacity onPress={() => { setStep(1); setReRecordId(null); }} style={styles.iconBtn}>
                                 <Ionicons name="close" size={24} color="white" />
                             </TouchableOpacity>
                             <View style={styles.progressBadge}>
@@ -675,11 +729,21 @@ export default function App() {
                                 )}
                             </View>
 
-                            {/* Tampilkan teks di bawah video agar jelas apa yang diucapkan */}
                             {selectedVideo && (
                                 <View style={{ padding: 15, backgroundColor: '#f8fafc' }}>
                                     <Text style={{ fontWeight: 'bold', color: '#6366f1', marginBottom: 5 }}>Kalimat:</Text>
                                     <Text style={{ fontSize: 16, color: '#334155' }}>{selectedVideo.text}</Text>
+                                </View>
+                            )}
+                            {selectedVideo && !selectedVideo.uploaded && (
+                                <View style={{ padding: 15, backgroundColor: 'white', alignItems: 'center' }}>
+                                    <TouchableOpacity
+                                        onPress={handleReRecord}
+                                        style={{ backgroundColor: '#f59e0b', width: '100%', padding: 14, borderRadius: 12, flexDirection: 'row', justifyContent: 'center', alignItems: 'center' }}
+                                    >
+                                        <Ionicons name="refresh" size={20} color="white" style={{ marginRight: 8 }} />
+                                        <Text style={{ color: 'white', fontWeight: 'bold', fontSize: 16 }}>Rekam Ulang Video Ini</Text>
+                                    </TouchableOpacity>
                                 </View>
                             )}
                         </View>
