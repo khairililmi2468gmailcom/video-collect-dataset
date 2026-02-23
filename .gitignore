@@ -1,7 +1,7 @@
 # --- GENERAL ---
 .DS_Store
 *.log
-
+panduan.md
 # --- NODE MODULES (Untuk Server & App) ---
 node_modules/
 **/node_modules/
