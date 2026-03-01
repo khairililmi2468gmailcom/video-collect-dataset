@@ -21,7 +21,8 @@ db.serialize(() => {
     db.run(`CREATE TABLE IF NOT EXISTS sentences (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         text TEXT NOT NULL,
-        category TEXT
+        category TEXT,
+        language TEXT
     )`);
 });
 
@@ -62,8 +63,15 @@ const upload = multer({ storage: storage });
 
 app.get('/api/sentences', (req, res) => {
     const limit = req.query.limit || 5; 
-    db.all(`SELECT * FROM sentences ORDER BY RANDOM() LIMIT ?`, [limit], (err, rows) => {
-        if (err) return res.status(500).json({ error: err.message });
+    let lang = req.query.lang;
+    
+    // Cegah error jika frontend mengirim string 'undefined'
+    if (!lang || lang === 'undefined') {
+        lang = 'Indonesia'; 
+    }
+    
+    db.all(`SELECT * FROM sentences WHERE language = ? ORDER BY RANDOM() LIMIT ?`, [lang, limit], (err, rows) => {
+        if (err) return res.status(500).json({ error: err.message }); // Ini yang memicu status 500 sebelumnya
         res.json(rows);
     });
 });
@@ -72,10 +80,13 @@ app.post('/api/import-sentences', (req, res) => {
     const sentences = req.body;
     if (!Array.isArray(sentences)) return res.status(400).json({ error: "Harus array JSON" });
 
-    const stmt = db.prepare("INSERT INTO sentences (text, category) VALUES (?, ?)");
+    const stmt = db.prepare("INSERT INTO sentences (text, category, language) VALUES (?, ?, ?)");
     db.serialize(() => {
         db.run("BEGIN TRANSACTION");
-        sentences.forEach(item => stmt.run(item.text, item.category || 'General'));
+        sentences.forEach(item => {
+            // Default ke Indonesia jika di JSON tidak ada
+            stmt.run(item.text, item.category || 'General', item.language || 'Indonesia');
+        });
         db.run("COMMIT", (err) => {
             if (err) return res.status(500).json({ error: err.message });
             res.json({ message: `Import ${sentences.length} kalimat sukses.` });

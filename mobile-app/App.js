@@ -16,7 +16,7 @@ if (Platform.OS !== 'web') {
 }
 
 // ⚠️ GANTI IP DI SINI
-const API_URL = '';
+const API_URL = process.env.EXPO_PUBLIC_API_URL;
 // Direktori simpan (Hanya untuk Native)
 const DIR_RECORDINGS = Platform.OS !== 'web'
     ? FileSystem.documentDirectory + 'recordings/'
@@ -55,7 +55,7 @@ export default function App() {
     const [sentences, setSentences] = useState([]);
 
     // User Data
-    const [meta, setMeta] = useState({ name: '', age: '', gender: 'Laki-laki' });
+    const [meta, setMeta] = useState({ name: '', age: '', gender: 'Laki-laki', language: 'Indonesia' });
     const [isProfileSaved, setIsProfileSaved] = useState(false);
 
     // Recording State
@@ -92,7 +92,12 @@ export default function App() {
         try {
             const savedMeta = await AsyncStorage.getItem('user_meta');
             if (savedMeta) {
-                setMeta(JSON.parse(savedMeta));
+                const parsedData = JSON.parse(savedMeta);
+                // Jika data lama tidak punya bahasa, beri default
+                if (!parsedData.language) {
+                    parsedData.language = 'Indonesia';
+                }
+                setMeta(parsedData);
                 setIsProfileSaved(true);
             }
         } catch (e) { console.log(e); }
@@ -100,28 +105,38 @@ export default function App() {
 
     const saveUserProfile = async () => {
         if (!meta.name || !meta.age) {
-            Alert.alert("Error", "Nama dan Umur wajib diisi!");
+            const msg = "Nama dan Umur wajib diisi!";
+            Platform.OS === 'web' ? window.alert(msg) : Alert.alert("Error", msg);
             return false;
         }
+
+        const finalMeta = { ...meta, language: meta.language || 'Indonesia' };
+
         try {
-            await AsyncStorage.setItem('user_meta', JSON.stringify(meta));
+            await AsyncStorage.setItem('user_meta', JSON.stringify(finalMeta));
+            setMeta(finalMeta);
             setIsProfileSaved(true);
             return true;
         } catch (e) { return false; }
     };
 
     const resetUserProfile = async () => {
-        Alert.alert("Ganti Data", "Anda yakin ingin mengubah data diri?", [
-            { text: "Batal", style: "cancel" },
-            {
-                text: "Ya, Ubah", onPress: async () => {
-                    await AsyncStorage.removeItem('user_meta');
-                    setMeta({ name: '', age: '', gender: 'Laki-laki' });
-                    setIsProfileSaved(false);
-                    setStep(1);
-                }
-            }
-        ]);
+        const executeReset = async () => {
+            await AsyncStorage.removeItem('user_meta');
+            setMeta({ name: '', age: '', gender: 'Laki-laki', language: 'Indonesia' });
+            setIsProfileSaved(false);
+            setStep(1);
+        };
+
+        if (Platform.OS === 'web') {
+            const isConfirmed = window.confirm("Anda yakin ingin mengubah data diri?");
+            if (isConfirmed) await executeReset();
+        } else {
+            Alert.alert("Ganti Data", "Anda yakin ingin mengubah data diri?", [
+                { text: "Batal", style: "cancel" },
+                { text: "Ya, Ubah", onPress: executeReset }
+            ]);
+        }
     };
 
     // --- LOGIC FILE & QUEUE ---
@@ -147,25 +162,26 @@ export default function App() {
         await AsyncStorage.setItem('offline_queue', JSON.stringify(newQueue));
     };
 
-    // --- FETCH SENTENCES ---
     const fetchSentences = async () => {
         const saved = await saveUserProfile();
         if (!saved) return;
 
         setLoading(true);
         try {
-            const res = await fetch(`${API_URL}/api/sentences?limit=50`);
+            const safeLang = meta.language || 'Indonesia';
+            const res = await fetch(`${API_URL}/api/sentences?limit=50&lang=${safeLang}`);
             const data = await res.json();
+
             if (Array.isArray(data) && data.length > 0) {
                 setSentences(data);
                 setStep(2);
             } else {
-                Alert.alert("Info", "Database server kosong.");
+                const msg = `Belum ada skrip untuk bahasa ${safeLang}.`;
+                Platform.OS === 'web' ? window.alert(msg) : Alert.alert("Info", msg);
             }
         } catch (error) {
-            // Jika offline, dan sudah ada data sebelumnya, kita bisa lanjut (opsional)
-            // Disini kita alert saja
-            Alert.alert("Koneksi", "Gagal mengambil skrip baru. Pastikan server nyala.");
+            const msg = "Gagal mengambil skrip baru. Pastikan API_URL benar dan server nyala.";
+            Platform.OS === 'web' ? window.alert(msg) : Alert.alert("Koneksi", msg);
         } finally {
             setLoading(false);
         }
@@ -567,6 +583,25 @@ export default function App() {
                                     <TouchableOpacity key={g} style={[styles.genderBtn, meta.gender === g && styles.genderBtnActive]} onPress={() => setMeta({ ...meta, gender: g })}>
                                         <Ionicons name={g === 'Laki-laki' ? 'male' : 'female'} size={18} color={meta.gender === g ? 'white' : '#64748b'} />
                                         <Text style={[styles.genderText, meta.gender === g && styles.genderTextActive]}>{g}</Text>
+                                    </TouchableOpacity>
+                                ))}
+                            </View>
+                            <Text style={[styles.label, { marginTop: 15 }]}>Bahasa Rekaman</Text>
+                            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
+                                {['Indonesia', 'English', 'Chinese', 'Urdu'].map((lang) => (
+                                    <TouchableOpacity
+                                        key={lang}
+                                        style={[
+                                            styles.genderBtn,
+                                            { flexBasis: '48%', marginBottom: 5 },
+                                            meta.language === lang && styles.genderBtnActive
+                                        ]}
+                                        onPress={() => setMeta({ ...meta, language: lang })}
+                                    >
+                                        <Ionicons name="language" size={18} color={meta.language === lang ? 'white' : '#64748b'} />
+                                        <Text style={[styles.genderText, meta.language === lang && styles.genderTextActive]}>
+                                            {lang}
+                                        </Text>
                                     </TouchableOpacity>
                                 ))}
                             </View>
